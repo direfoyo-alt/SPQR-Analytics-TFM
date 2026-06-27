@@ -1,0 +1,129 @@
+import pandas as pd
+import json
+import os
+import matplotlib.pyplot as plt
+import io
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.drawing.image import Image as ExcelImage
+
+# --- 1. CONFIGURACIÓN DE RUTAS ---
+# RECUERDA: Cambia esta ruta a la carpeta donde están tus archivos JSON
+ruta_origen = r'C:\TU_RUTA_AQUI' 
+
+escritorio = os.path.join(os.path.expanduser('~'), 'Desktop')
+carpeta_final = os.path.join(escritorio, 'eventing españa')
+
+if not os.path.exists(carpeta_final):
+    os.makedirs(carpeta_final, exist_ok=True)
+
+# --- 2. MAPEO EXTENDIDO DE EVENTOS (Para evitar el "Otros") ---
+# He añadido muchos más IDs para que sea ultra preciso
+diccionario_eventos = {
+    1: 'Pase', 2: 'Fuera de Juego', 3: 'Duelo', 4: 'Entrada/Tackle', 5: 'Salida de Balón',
+    6: 'Córner Ganado', 7: 'Saque de Meta', 8: 'Intercepción', 10: 'Parada Portero',
+    11: 'Recogida Portero', 12: 'Falta Recibida', 13: 'Falta Cometida', 14: 'Error',
+    15: 'Disparo / Intento', 16: 'GOL', 17: 'Tarjeta', 18: 'Jugador sale',
+    19: 'Jugador entra', 24: 'Inicio Parte', 30: 'Final Parte', 32: 'Inicio Partido',
+    34: 'Fin Partido', 41: 'Despeje de Puños', 42: 'Regate / Skill', 43: 'Sustitución',
+    44: 'Duelo Aéreo', 45: 'Reto/Challenge', 49: 'Recuperación de Balón', 
+    50: 'Pérdida de Balón', 51: 'Error que lleva a disparo', 52: 'Portero recoge balón',
+    54: 'Bloqueo de disparo', 55: 'Provocar fuera de juego', 61: 'Remate al palo'
+}
+
+def formatear_pro(ws):
+    header_fill = PatternFill(start_color="002060", end_color="002060", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    for row in ws.iter_rows(min_row=1, max_row=1):
+        for cell in row:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center')
+            cell.border = border
+
+# --- 3. PROCESAMIENTO ---
+for archivo in os.listdir(ruta_origen):
+    if archivo.endswith('.json'):
+        try:
+            ruta_full = os.path.join(ruta_origen, archivo)
+            with open(ruta_full, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Datos de equipos y marcador
+            contestants = data['matchInfo']['contestant']
+            h_team = next(c for c in contestants if c['position'] == 'home')
+            a_team = next(c for c in contestants if c['position'] == 'away')
+            scores = data['liveData']['matchDetails']['scores']['total']
+            resultado_final = f"{h_team['name']} {scores['home']} - {scores['away']} {a_team['name']}"
+            
+            # Procesar Eventos
+            eventos = data['liveData']['event']
+            df = pd.DataFrame(eventos)
+            
+            # Identificar Equipo y Traducir Acción (Sin "Otros")
+            df['Equipo'] = df['contestantId'].apply(lambda x: h_team['name'] if x == h_team['id'] else a_team['name'])
+            df['Acción'] = df['typeId'].map(diccionario_eventos).fillna(df['typeId'].apply(lambda x: f"Acción ID {x}"))
+            df['Resultado'] = df['outcome'].apply(lambda x: 'Éxito' if x == 1 else 'Fallo')
+
+            # Crear Excel
+            excel_name = archivo.replace('.json', '.xlsx')
+            excel_path = os.path.join(carpeta_final, excel_name)
+            
+            with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+                # PESTAÑA 1: EVENTING
+                df_ev = df[['timeMin', 'timeSec', 'Equipo', 'playerName', 'Acción', 'Resultado']].copy()
+                df_ev.columns = ['Minuto', 'Segundo', 'Equipo', 'Jugador', 'Acción Realizada', 'Resultado']
+                df_ev.to_excel(writer, sheet_name='Eventing Detallado', index=False)
+                
+                # PESTAÑA 2: RESUMEN COMPARATIVO
+                res_data = {
+                    'Estadística': ['MARCADOR FINAL', 'Acciones Totales', 'Pases', 'Disparos', 'Faltas', 'Recuperaciones'],
+                    h_team['name']: [
+                        scores['home'],
+                        len(df[df['Equipo'] == h_team['name']]),
+                        len(df[(df['Equipo'] == h_team['name']) & (df['Acción'] == 'Pase')]),
+                        len(df[(df['Equipo'] == h_team['name']) & (df['Acción'] == 'Disparo / Intento')]),
+                        len(df[(df['Equipo'] == h_team['name']) & (df['Acción'] == 'Falta Cometida')]),
+                        len(df[(df['Equipo'] == h_team['name']) & (df['Acción'] == 'Recuperación de Balón')])
+                    ],
+                    a_team['name']: [
+                        scores['away'],
+                        len(df[df['Equipo'] == a_team['name']]),
+                        len(df[(df['Equipo'] == a_team['name']) & (df['Acción'] == 'Pase')]),
+                        len(df[(df['Equipo'] == a_team['name']) & (df['Acción'] == 'Disparo / Intento')]),
+                        len(df[(df['Equipo'] == a_team['name']) & (df['Acción'] == 'Falta Cometida')]),
+                        len(df[(df['Equipo'] == a_team['name']) & (df['Acción'] == 'Recuperación de Balón')])
+                    ]
+                }
+                pd.DataFrame(res_data).to_excel(writer, sheet_name='Resumen Equipos', index=False)
+                
+                # PESTAÑA 3: GRÁFICO DIFERENCIADO
+                plt.figure(figsize=(12, 6))
+                # Histograma separado por colores
+                df[df['Equipo'] == h_team['name']]['timeMin'].hist(bins=30, alpha=0.5, label=h_team['name'], color='blue', grid=False)
+                df[df['Equipo'] == a_team['name']]['timeMin'].hist(bins=30, alpha=0.5, label=a_team['name'], color='red', grid=False)
+                
+                plt.title(f"Análisis de Intensidad: {resultado_final}", fontsize=14, fontweight='bold')
+                plt.xlabel("Minuto del Partido")
+                plt.ylabel("Volumen de Eventos")
+                plt.legend()
+                
+                img_data = io.BytesIO()
+                plt.savefig(img_data, format='png', bbox_inches='tight')
+                plt.close()
+                
+                wb = writer.book
+                ws_graf = wb.create_sheet('Gráfico Comparativo')
+                ws_graf.add_image(ExcelImage(img_data), 'B2')
+            
+            # Formateo final
+            wb = load_workbook(excel_path)
+            formatear_pro(wb['Eventing Detallado'])
+            formatear_pro(wb['Resumen Equipos'])
+            wb.save(excel_path)
+            
+        except Exception as e:
+            print(f"Error procesando {archivo}: {e}")
+
+print(f"¡Hecho! Todos los partidos están en: {carpeta_final}")

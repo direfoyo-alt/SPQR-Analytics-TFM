@@ -1,0 +1,113 @@
+import pandas as pd
+import json
+import os
+
+# =================================================================
+# 1. CONFIGURACIÓN DINÁMICA DE RUTAS
+# =================================================================
+
+# El código buscará los JSON en la carpeta donde lo ejecutes
+ruta_actual = os.getcwd() 
+
+# Cargamos Standings primero para saber qué liga es
+try:
+    with open('standings.json', 'r', encoding='utf-8') as f:
+        st_data = json.load(f)
+    nombre_liga = st_data.get('competition', {}).get('name', 'Liga Desconocida')
+except:
+    nombre_liga = "Liga Desconocida"
+
+# Definimos la ruta de destino según tu estructura de TFM
+escritorio = os.path.join(os.path.expanduser("~"), "Desktop")
+carpeta_base = os.path.join(escritorio, "RFM ENTRENAMIENTO", "Jornadas de la las ligas", nombre_liga, "jsons finales")
+
+# Creamos la carpeta automáticamente si no existe
+if not os.path.exists(carpeta_base):
+    os.makedirs(carpeta_base)
+
+def guardar_excel_pro(df, nombre_archivo):
+    """Aplica formato profesional, borra columnas vacías y guarda en la carpeta de la liga"""
+    df = df.dropna(axis=1, how='all')
+    ruta_completa = os.path.join(carpeta_base, nombre_archivo)
+    writer = pd.ExcelWriter(ruta_completa, engine='xlsxwriter')
+    df.to_excel(writer, index=False, sheet_name='Datos')
+    
+    workbook  = writer.book
+    worksheet = writer.sheets['Datos']
+    header_format = workbook.add_format({
+        'bold': True, 'text_wrap': True, 'valign': 'vcenter',
+        'align': 'center', 'fg_color': '#D7E4BC', 'border': 1
+    })
+
+    for col_num, value in enumerate(df.columns.values):
+        worksheet.write(0, col_num, value, header_format)
+        column_len = max(df[value].astype(str).map(len).max(), len(value)) + 3
+        worksheet.set_column(col_num, col_num, min(column_len, 50))
+    writer.close()
+
+# =================================================================
+# 2. PROCESAMIENTO CON TODAS LAS CORRECCIONES
+# =================================================================
+
+print(f"⏳ Procesando datos de: {nombre_liga}...")
+
+# --- A. CLASIFICACIÓN ---
+try:
+    limite = 18 if any(x in nombre_liga for x in ['Bundesliga', 'Ligue 1']) else 20
+    st_list = []
+    count = 0
+    for stage in st_data.get('stage', []):
+        for div in stage.get('division', []):
+            for rank in div.get('ranking', []):
+                if count < limite:
+                    st_list.append(rank); count += 1
+    df_st = pd.DataFrame(st_list)
+    map_st = {'rank': 'Posición', 'contestantName': 'Equipo', 'matchesPlayed': 'PJ', 'matchesWon': 'PG', 'matchesDrawn': 'PE', 'matchesLost': 'PP', 'goalsFor': 'GF', 'goalsAgainst': 'GC', 'goaldifference': 'Dif_Goles', 'points': 'Puntos', 'lastSix': 'Últimos 6'}
+    guardar_excel_pro(df_st[[c for c in map_st.keys() if c in df_st.columns]].rename(columns=map_st), '01_Clasificacion_Final.xlsx')
+except: print("❌ Fallo en Clasificación")
+
+# --- B. CALENDARIO ---
+try:
+    with open('matches.json', 'r', encoding='utf-8') as f:
+        m_data = json.load(f)
+    m_list = []
+    for m in m_data.get('match', []):
+        info = m.get('matchInfo', {})
+        cont = info.get('contestant', [])
+        f_raw = info.get('localDate') or info.get('date', '').split('T')[0].split('Z')[0]
+        m_list.append({'Jornada': info.get('week'), 'Fecha': f_raw, 'Local': cont[0].get('name'), 'Visitante': cont[1].get('name')})
+    guardar_excel_pro(pd.DataFrame(m_list), '02_Calendario_Final.xlsx')
+except: print("❌ Fallo en Calendario")
+
+# --- C. PLANTILLAS ---
+try:
+    with open('squads.json', 'r', encoding='utf-8') as f:
+        sq_data = json.load(f)
+    pos_es = {'Goalkeeper': 'Portero', 'Defender': 'Defensa', 'Midfielder': 'Centrocampista', 'Attacker': 'Delantero'}
+    players = []
+    for squad in sq_data.get('squad', []):
+        club = squad.get('contestantName')
+        for p in squad.get('person', []):
+            players.append({'Club': club, 'Jugador': p.get('knownName') or f"{p.get('firstName')} {p.get('lastName')}", 'Posición': pos_es.get(p.get('position'), p.get('position')), 'Dorsal': p.get('shirtNumber'), 'Nacionalidad': p.get('nationality'), 'ID_Universal': p.get('id')})
+    guardar_excel_pro(pd.DataFrame(players), '03_Plantillas_Final.xlsx')
+except: print("❌ Fallo en Plantillas")
+
+# --- D. ESTADÍSTICAS (TRADUCCIÓN TOTAL) ---
+try:
+    with open('rankings.json', 'r', encoding='utf-8') as f:
+        r_data = json.load(f)
+    traductor = {'accurate cross': 'Centros precisos', 'accurate pass': 'Pases precisos', 'attempts conceded ibox': 'Remates recibidos área', 'attempts conceded obox': 'Remates recibidos fuera área', 'attempts conceded': 'Remates recibidos totales', 'blocked scoring att': 'Remates bloqueados', 'card': 'Tarjetas totales', 'claim': 'Balones atrapados (Portero)', 'clean sheet': 'Porterías a cero', 'clearance': 'Despejes', 'contest': 'Duelos', 'cross pct': '% Centros precisos', 'cross': 'Centros', 'direct setpiece goals': 'Goles de falta directa', 'dribbles attempted': 'Regates intentados', 'duels lost': 'Duelos perdidos', 'duels won': 'Duelos ganados', 'fouls': 'Faltas cometidas', 'games': 'Partidos jugados', 'goal conversion': '% Conversión de goles', 'goals conceded ibox': 'Goles encajados área', 'goals conceded obox': 'Goles encajados fuera área', 'goals conceded': 'Goles encajados totales', 'goals': 'Goles', 'lost corners': 'Córners en contra', 'offside': 'Fueras de juego', 'ontarget scoring att': 'Remates a puerta', 'pass pct': '% Pases precisos', 'pass': 'Pases totales', 'red card': 'Tarjetas Rojas', 'scoring accuracy': '% Puntería', 'scoring att': 'Remates totales', 'tackle pct': '% Entradas ganadas', 'tackle': 'Entradas', 'takeon': 'Regates superados', 'touches in opposition box': 'Toques en área rival', 'was fouled': 'Faltas recibidas', 'won corners': 'Córners a favor', 'won tackle': 'Entradas ganadas', 'yellow card': 'Tarjetas Amarillas', 'possession': 'Posesión (%)', 'expected goals': 'Goles esperados (xG)'}
+    stats_final = []
+    for team in r_data.get('team', []):
+        fila = {'Equipo': team.get('name')}
+        for s in team.get('stat', []):
+            label = s['type'].replace("total ", "").replace(" ranking", "")
+            final_label = f"{traductor.get(label, label.capitalize())} (Rank)" if " ranking" in s['type'] else traductor.get(label, label.capitalize())
+            fila[final_label] = s['value']
+        stats_final.append(fila)
+    df_stats = pd.DataFrame(stats_final)
+    cols = ['Equipo'] + sorted([c for c in df_stats.columns if c != 'Equipo'])
+    guardar_excel_pro(df_stats[cols], '04_Estadisticas_Avanzadas_Final.xlsx')
+except: print("❌ Fallo en Estadísticas")
+
+print(f"\n✅ PROCESO COMPLETADO. Archivos guardados en: {carpeta_base}")

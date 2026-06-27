@@ -1,0 +1,600 @@
+import dash
+from dash import html, dcc, Input, Output, State, callback_context
+import webbrowser
+from pathlib import Path
+from threading import Timer
+import os
+import base64
+import pandas as pd  # AÑADIDO PARA EL RANKING
+
+# 1. Configuración de rutas
+ruta_escritorio = Path.home() / "Desktop"
+ruta_tfm = ruta_escritorio / "TFM ENTRENAMIENTO"
+ruta_escudos = ruta_tfm / "nombres y escudos de equipos" / "ESCUDOS"
+ruta_logo_web = ruta_tfm / "logo Soccer Performance Analytics.png"
+ruta_imagen_titulo = ruta_tfm / "titulo.png" 
+ruta_jornadas = ruta_tfm / "Jornadas de las ligas"
+ruta_eventing_base = ruta_tfm / "excells y codigo pro" / "PARTIDOS 5 GRANDES LIGAS HASTA JORNADA X"
+ruta_capturas = ruta_tfm / "imagenes entreno powerby"
+ruta_betis = ruta_capturas / "betis"
+ruta_atletico = ruta_capturas / "atletico de madrid"
+ruta_eventing_img = ruta_capturas / "eventing"
+ruta_fondo = ruta_tfm / "fondo pagina web.jfif"
+
+# RUTAS EUROPA
+ruta_europa = ruta_capturas / "estadisticas europa"
+ruta_graficos_europa = ruta_europa / "graficos europa"
+
+# Mapeos de carpetas
+MAPEO_LIGAS_CARPETAS = {
+    "LaLiga": "españa", "Premier_league": "inglaterra", 
+    "Serie_A": "italia", "Bundesliga": "alemania", "Ligue_1": "francia"
+}
+
+MAPEO_EVENTING = {
+    "LaLiga": "eventing españa", "Premier_league": "eventing inglaterra", 
+    "Serie_A": "eventing italia", "Bundesliga": "eventing alemania", "Ligue_1": "eventing francia"
+}
+
+# Excel Globales
+ruta_excel_jugadores = ruta_tfm / "nombres y escudos de equipos" / "CARACTERISTICAS DE LOS JUGADORES" / "excell pro" / "Informe_Maestro_Estadisticas_Europeas.xlsx"
+ruta_excel_equipos = ruta_tfm / "nombres y escudos de equipos" / "CARACTERISTICAS DE LOS EQUIPOS" / "excell directorio de equipos" / "Directorio_Recursos_Equipos_PRO2_ACTUALIZADO.xlsx"
+
+ligas = ["LaLiga", "Premier league", "Serie A", "Bundesliga", "Ligue 1"]
+
+# 2. Función de codificación de imagen
+def encode_image(image_path):
+    if image_path and os.path.exists(image_path):
+        with open(image_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode('ascii')
+            ext = str(image_path).split('.')[-1]
+            mime_type = "jpeg" if ext.lower() == "jfif" else ext
+        
+            return f"data:image/{mime_type};base64,{encoded}"
+    return ""
+
+# 3. Inicializar la App
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
+
+# --- AÑADIDO: LÓGICA DEL RANKING EUROPEO ---
+ranking_equipos = []
+try:
+    if os.path.exists(ruta_excel_jugadores):
+        df_jugadores = pd.read_excel(ruta_excel_jugadores)
+        # Buscar las columnas de eventos exitosos o ganados
+        cols_exitosos = [col for col in df_jugadores.columns if 'Successful' in col or 'Won' in col or 'won' in col.lower()]
+        if cols_exitosos:
+            # Agrupar por equipo y sumar
+            df_equipos = df_jugadores.groupby('equipo')[cols_exitosos].sum().sum(axis=1).reset_index()
+            df_equipos.columns = ['equipo', 'total_exitosos']
+            df_equipos = df_equipos.sort_values('total_exitosos', ascending=False).reset_index(drop=True)
+            df_equipos['ranking'] = df_equipos.index + 1
+            ranking_equipos = df_equipos.to_dict('records')
+except Exception as e:
+    print(f"Error cargando el ranking: {e}")
+
+def generar_lista_ranking(ranking_list, equipo_seleccionado=None):
+    if not ranking_list:
+        return [html.P("No se pudo cargar el ranking. Verifica el archivo Excel.", style={'color': 'red', 'textAlign': 'center'})]
+    
+    elementos = []
+    for row in ranking_list:
+        is_selected = (row['equipo'] == equipo_seleccionado)
+        bg_color = 'rgba(0, 255, 204, 0.3)' if is_selected else 'transparent'
+        border_color = '#00FFCC' if is_selected else '#333'
+        
+        elemento = html.Div(
+            id=f"item-ranking-{str(row['equipo']).replace(' ', '_')}",
+            style={
+                'display': 'flex', 'justifyContent': 'space-between', 'padding': '15px', 
+                'borderBottom': f'1px solid {border_color}', 'backgroundColor': bg_color,
+                'fontWeight': 'bold' if is_selected else 'normal',
+                'transition': '0.3s'
+            },
+            children=[
+                html.Span(f"TOP {row['ranking']} - {row['equipo']}", style={'color': 'white' if not is_selected else '#00FFCC', 'fontSize': '18px'}),
+                html.Span(f"{int(row['total_exitosos'])} eventos", style={'color': '#888' if not is_selected else '#00FFCC'})
+            ]
+        )
+        elementos.append(elemento)
+    return elementos
+# ---------------------------------------------
+
+# Estilos
+ESTILO_MENU_ITEM = {
+    'flex': '1', 'height': '300px', 'margin': '0 20px',
+    'backgroundColor': 'rgba(21, 21, 21, 0.85)', 
+    'border': '4px solid #00FFCC',
+    'borderRadius': '30px', 'color': '#00FFCC', 'fontSize': '35px',
+    'fontWeight': 'bold', 'display': 'flex', 
+    'alignItems': 'center',
+    'justifyContent': 'center', 'cursor': 'pointer', 'textTransform': 'uppercase',
+    'textDecoration': 'none', 'transition': '0.3s', 'textAlign': 'center'
+}
+
+ESTILO_CAJA_EXCEL = {
+    'backgroundColor': 'rgba(26, 26, 26, 0.9)', 
+    'padding': '20px 30px', 
+    'borderRadius': '15px',
+    'border': '1px solid #333', 'marginBottom': '15px', 'display': 'flex',
+    'justifyContent': 'space-between', 'alignItems': 'center', 'width': '90%'
+}
+
+# 4. Layout Base
+app.layout = html.Div(style={
+    'minHeight': '100vh', 'width': '100vw', 'margin': '0', 'padding': '0',
+    'color': 'white', 'fontFamily': 'Segoe UI, Arial, sans-serif', 'position': 'relative',
+    'backgroundImage': f'url({encode_image(ruta_fondo)})',
+    'backgroundSize': 'cover', 'backgroundPosition': 'center', 'backgroundAttachment': 'fixed', 'backgroundRepeat': 'no-repeat'
+}, children=[
+    html.Div(style={'position': 'fixed', 'top': '0', 'left': '0', 'width': '100%', 'height': '100%', 'backgroundColor': 'rgba(0, 0, 0, 0.6)', 'zIndex': '1'}),
+  
+    html.Div(style={'position': 'relative', 'zIndex': '2', 'padding': '20px'}, children=[
+        dcc.Location(id='url', refresh=False),
+        dcc.Download(id="download-excel"),
+        dcc.Download(id="download-partido"),
+        dcc.Download(id="download-captura"),
+        dcc.Download(id="download-eventing-img"),
+        dcc.Download(id="download-europa-img"),
+        
+        html.Div(id='contenedor-volver', style={'position': 'absolute', 'top': '40px', 'left': '40px', 'zIndex': '10'}),
+        
+        # CABECERA
+        html.Div(style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center', 'height': '220px', 'gap': '40px'}, children=[
+            html.Img(src=encode_image(ruta_logo_web), style={'height': '180px'}),
+            html.Div(style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center'}, children=[
+                html.Img(src=encode_image(ruta_imagen_titulo), style={'height': '100px', 'width': 'auto'}),
+                html.P("Soccer Performance Quant Research", style={
+                    'margin': '0', 'fontSize': '1.5em', 'color': '#00FFCC', 'opacity': '0.9', 
+                    'marginTop': '5px', 'letterSpacing': '2px', 'fontWeight': 'bold', 'textAlign': 'center'
+                })
+            ]),
+        ]),
+        html.Div(id='page-content', style={'flex': '1', 'padding': '20px', 'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center'})
+    ])
+])
+
+# --- 5. Callbacks de Navegación ---
+
+@app.callback(
+    [Output('page-content', 'children'), Output('contenedor-volver', 'children')],
+    Input('url', 'pathname')
+)
+def display_page(pathname):
+    if pathname == '/' or pathname is None:
+        portada = html.Div(style={'display': 'flex', 'justifyContent': 'space-evenly', 'marginTop': '80px', 'width': '100%'}, children=[
+            html.Div([
+                dcc.Link(html.Img(src=encode_image(ruta_escudos / liga / "icono.png"), style={
+                    'width': '220px', 'height': '220px', 'borderRadius': '20px', 'border': '3px solid #00FFCC', 'padding': '15px', 'backgroundColor': 'rgba(21, 21, 21, 0.8)'
+                }), href=f'/{liga.replace(" ", "_")}') ,
+                html.P(liga, style={'textAlign': 'center', 'marginTop': '15px', 'fontSize': '18px', 'fontWeight': 'bold'})
+            ]) for liga in ligas
+        ])
+        
+        # --- AÑADIDO: INTERFAZ DEL RANKING EN LA PORTADA ---
+        opciones_dropdown = [{'label': row['equipo'], 'value': row['equipo']} for row in ranking_equipos]
+        
+        ranking_layout = html.Div(style={
+            'marginTop': '50px', 'width': '80%', 'backgroundColor': 'rgba(21, 21, 21, 0.85)', 
+            'padding': '30px', 'borderRadius': '20px', 'border': '2px solid #00FFCC', 'margin': '50px auto'
+        }, children=[
+            html.H2("RANKING EUROPEO DE EQUIPOS (EVENTOS EXITOSOS)", style={'textAlign': 'center', 'color': '#00FFCC', 'marginBottom': '30px'}),
+            html.Div(style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '20px'}, children=[
+                html.Div(style={'width': '50%'}, children=[
+                    dcc.Dropdown(
+                        id='dropdown-ranking-equipo',
+                        options=opciones_dropdown,
+                        placeholder="Busca y selecciona un equipo para ver su ranking...",
+                        style={'color': 'black'}
+                    )
+                ]),
+            ]),
+            html.Div(
+                id='scroll-ranking-container',
+                style={
+                    'height': '400px', 'overflowY': 'scroll', 'border': '1px solid #333', 
+                    'padding': '10px', 'borderRadius': '10px', 'backgroundColor': 'rgba(0,0,0,0.5)'
+                },
+                children=generar_lista_ranking(ranking_equipos)
+            )
+        ])
+        
+        portada_completa = html.Div([portada, ranking_layout], style={'width': '100%'})
+        return portada_completa, None
+        # ---------------------------------------------------
+
+    partes = pathname.strip('/').split('/')
+    id_liga = partes[0]
+    nombre_liga_visual = id_liga.replace('_', ' ')
+
+    # --- VISTA DETALLADA REAL BETIS ---
+    if len(partes) > 2 and partes[2] == 'Real_Betis':
+        archivos_betis = os.listdir(ruta_betis) if ruta_betis.exists() else []
+        img_extensions = ('.png', '.jpg', '.jpeg', '.jfif')
+        nuevas_imagenes = [f for f in archivos_betis if f.lower().endswith(img_extensions)]
+        excel_betis = [f for f in archivos_betis if f.lower().endswith('.xlsx')]
+
+        seccion_excel = []
+        if excel_betis:
+            seccion_excel = [
+                html.H4("DOCUMENTACIÓN EXCEL", style={'color': '#888', 'marginTop': '20px'}),
+                html.Div(style=ESTILO_CAJA_EXCEL, children=[
+                    html.Span(f"📊 {excel_betis[0]}", style={'color': 'white', 'fontSize': '18px'}),
+                    html.Button("DESCARGAR EXCEL", id={'type': 'btn-descarga-img', 'index': f"betis__{excel_betis[0]}"}, n_clicks=0, className="btn-download")
+                ]),
+                html.Hr(style={'width': '90%', 'borderColor': '#333', 'margin': '30px 0'})
+            ]
+
+        vista_betis = html.Div(style={'width': '95%', 'textAlign': 'center'}, children=[
+            html.H2("ANÁLISIS DETALLADO - REAL BETIS", style={'color': '#00FFCC', 'marginBottom': '40px'}),
+            *seccion_excel,
+            html.H4("GALERÍA DE ANÁLISIS", style={'color': '#888', 'marginBottom': '20px'}),
+            html.Div(style={'display': 'grid', 'gridTemplateColumns': '1fr 1fr', 'gap': '30px'}, children=[
+                html.Div([
+                    html.Img(src=encode_image(ruta_betis / img), style={'width': '100%', 'borderRadius': '15px', 'border': '2px solid #333'}),
+                    html.Button("DESCARGAR IMAGEN", id={'type': 'btn-descarga-img', 'index': f"betis__{img}"}, n_clicks=0, className="btn-download", style={'marginTop': '10px', 'width': '100%'})
+                ]) for img in nuevas_imagenes
+            ])
+        ])
+        return vista_betis, dcc.Link("← VOLVER A EQUIPOS", href=f'/{id_liga}/equipos', style={'color': '#00FFCC', 'border': '2px solid #00FFCC', 'padding': '10px 20px', 'borderRadius': '10px', 'textDecoration': 'none'})
+
+    # --- VISTA DETALLADA ATLETICO DE MADRID ---
+    elif len(partes) > 2 and partes[2] == 'Atletico_de_Madrid':
+        archivos_atletico = os.listdir(ruta_atletico) if ruta_atletico.exists() else []
+        img_extensions = ('.png', '.jpg', '.jpeg', '.jfif')
+        nuevas_imagenes = [f for f in archivos_atletico if f.lower().endswith(img_extensions)]
+        excel_atletico = [f for f in archivos_atletico if f.lower().endswith('.xlsx')]
+
+        seccion_excel = []
+        if excel_atletico:
+            seccion_excel = [
+                html.H4("DOCUMENTACIÓN EXCEL", style={'color': '#888', 'marginTop': '20px'}),
+                html.Div(style=ESTILO_CAJA_EXCEL, children=[
+                    html.Span(f"📊 {excel_atletico[0]}", style={'color': 'white', 'fontSize': '18px'}),
+                    html.Button("DESCARGAR EXCEL", id={'type': 'btn-descarga-img', 'index': f"atletico__{excel_atletico[0]}"}, n_clicks=0, className="btn-download")
+                ]),
+                html.Hr(style={'width': '90%', 'borderColor': '#333', 'margin': '30px 0'})
+            ]
+
+        vista_atletico = html.Div(style={'width': '95%', 'textAlign': 'center'}, children=[
+            html.H2("ANÁLISIS DETALLADO - ATLÉTICO DE MADRID", style={'color': '#00FFCC', 'marginBottom': '40px'}),
+            *seccion_excel,
+            html.H4("GALERÍA DE ANÁLISIS", style={'color': '#888', 'marginBottom': '20px'}),
+            html.Div(style={'display': 'grid', 'gridTemplateColumns': '1fr 1fr', 'gap': '30px'}, children=[
+                html.Div([
+                    html.Img(src=encode_image(ruta_atletico / img), style={'width': '100%', 'borderRadius': '15px', 'border': '2px solid #333'}),
+                    html.Button("DESCARGAR IMAGEN", id={'type': 'btn-descarga-img', 'index': f"atletico__{img}"}, n_clicks=0, className="btn-download", style={'marginTop': '10px', 'width': '100%'})
+                ]) for img in nuevas_imagenes
+            ])
+        ])
+        return vista_atletico, dcc.Link("← VOLVER A EQUIPOS", href=f'/{id_liga}/equipos', style={'color': '#00FFCC', 'border': '2px solid #00FFCC', 'padding': '10px 20px', 'borderRadius': '10px', 'textDecoration': 'none'})
+
+    elif len(partes) > 1 and partes[1] == 'equipos':
+        ruta_liga = ruta_escudos / nombre_liga_visual
+        archivos_equipos = [f for f in os.listdir(ruta_liga) if f.endswith('.png') and f != 'icono.png'] if os.path.exists(ruta_liga) else []
+        elementos_grid = []
+        for archivo in archivos_equipos:
+            nombre_equipo = archivo.replace('.png', '')
+            contenido_card = [
+                html.Img(src=encode_image(ruta_liga / archivo), style={'width': '110px', 'height': '110px', 'objectFit': 'contain'}),
+                html.P(nombre_equipo.replace('_', ' '), style={'marginTop': '15px', 'fontSize': '14px', 'fontWeight': 'bold', 'color': '#00FFCC'})
+            ]
+            
+            # Lógica para hacer clicable Betis y Atlético
+            if "LALIGA" in id_liga.upper():
+                if "BETIS" in nombre_equipo.upper():
+                    card = dcc.Link(contenido_card, href=f'/{id_liga}/equipos/Real_Betis', style={'textDecoration': 'none'})
+                elif "ATLETICO" in nombre_equipo.upper() or "ATLÉTICO" in nombre_equipo.upper():
+                    card = dcc.Link(contenido_card, href=f'/{id_liga}/equipos/Atletico_de_Madrid', style={'textDecoration': 'none'})
+                else:
+                    card = html.Div(contenido_card)
+            else:
+                card = html.Div(contenido_card)
+         
+            cursor_style = 'pointer' if ("BETIS" in nombre_equipo.upper() or "ATLETICO" in nombre_equipo.upper()) and "LALIGA" in id_liga.upper() else 'default'
+            elementos_grid.append(html.Div(card, style={'textAlign': 'center', 'backgroundColor': 'rgba(21, 21, 21, 0.9)', 'padding': '20px', 'borderRadius': '20px', 'border': '1px solid #333', 'cursor': cursor_style}))
+            
+        return html.Div([html.H2(f"EQUIPOS - {nombre_liga_visual.upper()}"), html.Div(elementos_grid, style={'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fill, minmax(180px, 1fr))', 'gap': '25px', 'width': '100%'})], style={'width': '100%'}), dcc.Link("← VOLVER AL MENÚ", href=f'/{id_liga}', style={'color': '#00FFCC', 'border': '2px solid #00FFCC', 'padding': '10px 20px', 'borderRadius': '10px', 'textDecoration': 'none'})
+
+    elif len(partes) > 1 and partes[1] == 'estadisticas':
+        excels_especificos = ["01_Clasificacion_Final", "02_Calendario_Final", "03_Plantillas_Final", "04_Estadisticas_Avanzadas_Final"]
+        opciones_europa = [
+            {'label': '--- METRICAS Y GRAFICO COMPARATIVO ---', 'value': 'title1', 'disabled': True},
+            {'label': '📊 VER COMPARATIVA GLOBAL (METRICAS)', 'value': 'europa_metricas'},
+            {'label': '--- GRAFICOS COMPARATIVOS ---', 'value': 'title2', 'disabled': True},
+            {'label': '📈 VER COMPARATIVA GLOBAL (GRAFICOS)', 'value': 'europa_graficos'}
+        ]
+
+        vista_excel = html.Div(style={'width': '100%', 'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center'}, children=[
+            html.H2(f"INFORMES DE {nombre_liga_visual.upper()}", style={'color': '#00FFCC', 'marginBottom': '30px'}),
+            html.Div(style={'width': '90%', 'marginBottom': '40px', 'padding': '20px', 'border': '2px solid #00FFCC', 'borderRadius': '15px', 'backgroundColor': 'rgba(0,0,0,0.3)'}, children=[
+                html.H3("COMPARATIVA EUROPA", style={'color': '#00FFCC', 'textAlign': 'center'}),
+                dcc.Dropdown(id='dropdown-europa', options=opciones_europa, placeholder="Selecciona una comparativa...", style={'color': 'black'}),
+                html.Div(id='visor-europa-dinamico', style={'marginTop': '30px', 'display': 'flex', 'flexWrap': 'wrap', 'justifyContent': 'center', 'gap': '30px'})
+            ]),
+            html.H4("REPORTES GLOBALES", style={'alignSelf': 'flex-start', 'marginLeft': '5%', 'color': '#888'}),
+            html.Div(style=ESTILO_CAJA_EXCEL, children=[html.Span("📊 Informe Maestro Estadísticas Europeas"), html.Button("DESCARGAR", id="btn-global-1", n_clicks=0, className="btn-download")]),
+            html.Div(style=ESTILO_CAJA_EXCEL, children=[html.Span("🏢 Directorio Recursos Equipos PRO2"), html.Button("DESCARGAR", id="btn-global-2", n_clicks=0, className="btn-download")]),
+            html.Hr(style={'width': '90%', 'borderColor': '#333', 'margin': '20px 0'}),
+            html.H4(f"DATOS ESPECÍFICOS: {nombre_liga_visual}", style={'alignSelf': 'flex-start', 'marginLeft': '5%', 'color': '#888'}),
+            html.Div([html.Div(style=ESTILO_CAJA_EXCEL, children=[html.Span(f"📄 {ex.replace('_', ' ')}"), html.Button("DESCARGAR", id={'type': 'btn-liga', 'index': ex}, n_clicks=0, className="btn-download")]) for ex in excels_especificos])
+        ])
+        return vista_excel, dcc.Link("← VOLVER AL MENÚ", href=f'/{id_liga}', style={'color': '#00FFCC', 'border': '2px solid #00FFCC', 'padding': '10px 20px', 'borderRadius': '10px', 'textDecoration': 'none'})
+
+    elif len(partes) > 1 and partes[1] == 'partidos':
+        carpeta_eventing = MAPEO_EVENTING.get(id_liga, "")
+        ruta_partidos = ruta_eventing_base / carpeta_eventing
+        opciones_partidos = [{'label': f.replace('.xlsx', '').replace('_', ' '), 'value': f} for f in os.listdir(ruta_partidos) if f.endswith('.xlsx')] if os.path.exists(ruta_partidos) else []
+
+        nombre_subcarpeta_img = MAPEO_LIGAS_CARPETAS.get(id_liga, "")
+        ruta_img_liga = ruta_eventing_img / nombre_subcarpeta_img
+        
+        opciones_visuales = []
+        if os.path.exists(ruta_img_liga):
+            archivos = sorted(os.listdir(ruta_img_liga))
+            graficos = [f for f in archivos if f.lower().startswith("grafico")]
+            if graficos:
+                opciones_visuales.append({'label': '--- GRÁFICOS ---', 'value': 'title1', 'disabled': True})
+                for i, g in enumerate(graficos, 1):
+                    opciones_visuales.append({'label': f"📈 GRAFICO {i}", 'value': g})
+            
+            metricas = [f for f in archivos if "captura de pantalla" in f.lower()]
+            if metricas:
+                opciones_visuales.append({'label': '--- MÉTRICAS ---', 'value': 'title2', 'disabled': True})
+                for i, m in enumerate(metricas, 1):
+                    opciones_visuales.append({'label': f"📋 METRICA {i}", 'value': m})
+
+        vista_partidos = html.Div(style={'width': '95%', 'marginTop': '50px', 'textAlign': 'center'}, children=[
+            html.H2(f"PARTIDOS Y ANÁLISIS - {nombre_liga_visual.upper()}", style={'color': '#00FFCC', 'marginBottom': '40px'}),
+            html.Div(style={'display': 'flex', 'gap': '20px', 'justifyContent': 'center', 'marginBottom': '30px'}, children=[
+                html.Div(style={'width': '45%'}, children=[
+                    html.P("SELECCIONAR PARTIDO (EXCEL)", style={'color': '#888', 'fontSize': '14px'}),
+                    dcc.Dropdown(id='dropdown-partidos', options=opciones_partidos, placeholder="Busca un partido...", style={'color': 'black'})
+                ]),
+                html.Div(style={'width': '45%'}, children=[
+                    html.P("GRÁFICOS Y MÉTRICAS", style={'color': '#888', 'fontSize': '14px'}),
+                    dcc.Dropdown(id='dropdown-visuales', options=opciones_visuales, placeholder="Selecciona Gráfico o Métrica...", style={'color': 'black'})
+                ]),
+            ]),
+            html.Div(id='contenedor-descarga-partido', style={'marginTop': '20px'}),
+            html.Hr(style={'margin': '40px 0', 'borderColor': '#333'}),
+            html.Div(id='visor-imagenes-dinamico', style={
+                'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center', 'minHeight': '500px',
+                'backgroundColor': 'rgba(0,0,0,0.4)', 'borderRadius': '20px', 'padding': '30px'
+            })
+        ])
+        return vista_partidos, dcc.Link("← VOLVER AL MENÚ", href=f'/{id_liga}', style={'color': '#00FFCC', 'border': '2px solid #00FFCC', 'padding': '10px 20px', 'borderRadius': '10px', 'textDecoration': 'none'})
+    else:
+        menu_liga = html.Div(style={'marginTop': '50px', 'width': '100%'}, children=[
+            html.H2(f"PANEL DE CONTROL - {nombre_liga_visual.upper()}", style={'textAlign': 'center', 'marginBottom': '50px'}),
+            html.Div(style={'display': 'flex', 'justifyContent': 'center'}, children=[
+                dcc.Link("ESTADÍSTICAS", href=f'/{id_liga}/estadisticas', style=ESTILO_MENU_ITEM),
+                dcc.Link("PARTIDOS", href=f'/{id_liga}/partidos', style=ESTILO_MENU_ITEM),
+                dcc.Link("EQUIPOS", href=f'/{id_liga}/equipos', style=ESTILO_MENU_ITEM),
+            ])
+        ])
+        return menu_liga, dcc.Link("← VOLVER AL INICIO", href='/', style={'color': '#00FFCC', 'border': '2px solid #00FFCC', 'padding': '10px 20px', 'borderRadius': '10px', 'textDecoration': 'none'})
+
+# --- CALLBACK VISOR COMPARATIVA EUROPA ---
+@app.callback(
+    Output('visor-europa-dinamico', 'children'),
+    Input('dropdown-europa', 'value')
+)
+def actualizar_visor_europa(value):
+    if not value: return ""
+    elementos = []
+    if value == 'europa_metricas':
+        carpetas = ["metricas y grafico alemania", "metricas y grafico españa", "metricas y grafico italia", "metricas y grafico inglaterra", "metricas y grafico francia"]
+        for carp in carpetas:
+            ruta_carp = ruta_europa / carp
+            if ruta_carp.exists():
+                imgs = [f for f in os.listdir(ruta_carp) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                for i, img in enumerate(imgs, 1):
+                    id_descarga = f"europa__{carp}__{img}"
+                    elementos.append(html.Div(style={'textAlign': 'center', 'marginBottom': '20px'}, children=[
+                        html.Img(src=encode_image(ruta_carp / img), style={'width': '500px', 'borderRadius': '10px', 'border': '2px solid #00FFCC'}),
+                        html.P(f"GRAFICO {i} - {carp.split(' ')[-1].upper()}", style={'fontSize': '14px', 'color': '#00FFCC', 'marginTop': '5px'}),
+                        html.Button("DESCARGAR", id={'type': 'btn-descarga-europa', 'index': id_descarga}, n_clicks=0, className="btn-download", style={'width': '100%'})
+                    ]))
+    elif value == 'europa_graficos':
+        if ruta_graficos_europa.exists():
+            imgs = sorted([f for f in os.listdir(ruta_graficos_europa) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+            for i, img in enumerate(imgs, 1):
+                id_descarga = f"grafico_europa__root__{img}"
+                elementos.append(html.Div(style={'textAlign': 'center', 'marginBottom': '20px'}, children=[
+                    html.Img(src=encode_image(ruta_graficos_europa / img), style={'width': '600px', 'borderRadius': '10px', 'border': '2px solid #00FFCC'}),
+                    html.P(f"GRAFICO {i}", style={'fontSize': '14px', 'color': '#00FFCC', 'marginTop': '5px'}),
+                    html.Button("DESCARGAR", id={'type': 'btn-descarga-europa', 'index': id_descarga}, n_clicks=0, className="btn-download", style={'width': '100%'})
+                ]))
+    return elementos
+
+# --- CALLBACK VISUALIZAR PARTIDOS ---
+@app.callback(
+    Output('visor-imagenes-dinamico', 'children'),
+    [Input('dropdown-visuales', 'value')],
+    [State('url', 'pathname')]
+)
+def actualizar_visor_imagen(selected_img, pathname):
+    if not selected_img:
+        return html.P("Selecciona un elemento para visualizar", style={'opacity': '0.5', 'fontSize': '18px'})
+    id_liga = pathname.strip('/').split('/')[0]
+    nombre_subcarpeta = MAPEO_LIGAS_CARPETAS.get(id_liga, "")
+    ruta_archivo = ruta_eventing_img / nombre_subcarpeta / selected_img
+    es_metrica = "captura de pantalla" in selected_img.lower()
+    if ruta_archivo.exists():
+        return html.Div(style={'width': '100%', 'textAlign': 'center'}, children=[
+            html.Img(src=encode_image(ruta_archivo), style={
+                'width': '40%' if es_metrica else '85%',
+                'maxWidth': '500px' if es_metrica else '1100px',
+                'height': 'auto',
+                'borderRadius': '10px',
+                'border': '2px solid #00FFCC',
+                'boxShadow': '0px 0px 30px rgba(0, 255, 204, 0.3)',
+                'imageRendering': 'auto' 
+            }),
+            html.Br(),
+            html.Button("DESCARGAR IMAGEN", id={'type': 'btn-descarga-img-eventing', 'index': f"{id_liga}____{selected_img}"}, 
+                        className="btn-download", style={'marginTop': '25px', 'fontSize': '16px'})
+        ])
+    return "Imagen no encontrada"
+
+# --- 6. Callbacks de Descarga ---
+
+@app.callback(
+    Output("download-europa-img", "data"),
+    Input({'type': 'btn-descarga-europa', 'index': dash.ALL}, 'n_clicks'),
+    prevent_initial_call=True
+)
+def descargar_img_europa(n_clicks):
+    ctx = callback_context
+    if not ctx.triggered: return dash.no_update
+    clicked_id = ctx.triggered_id
+    val_trigger = ctx.triggered[0]['value']
+    if not clicked_id or val_trigger is None or val_trigger == 0: return dash.no_update
+    index_str = clicked_id['index']
+    _, carp, img = index_str.split('__')
+    ruta_final = ruta_graficos_europa / img if carp == "root" else ruta_europa / carp / img
+    if ruta_final.exists(): return dcc.send_file(str(ruta_final))
+    return dash.no_update
+
+# MODIFICADO: Descarga archivos de Betis o Atlético según el prefijo
+@app.callback(
+    Output("download-captura", "data"),
+    Input({'type': 'btn-descarga-img', 'index': dash.ALL}, 'n_clicks'),
+    prevent_initial_call=True
+)
+def descargar_archivo_equipo_detallado(n_clicks):
+    ctx = callback_context
+    if not ctx.triggered: return dash.no_update
+    clicked_id = ctx.triggered_id
+    idx_trigger = ctx.triggered[0]['value']
+    if not clicked_id or idx_trigger is None or idx_trigger == 0: return dash.no_update
+    
+    index_str = clicked_id['index']
+    if "__" in index_str:
+        prefijo, nombre_archivo = index_str.split("__", 1)
+        if prefijo == "betis":
+            ruta_archivo = ruta_betis / nombre_archivo
+        elif prefijo == "atletico":
+            ruta_archivo = ruta_atletico / nombre_archivo
+        else:
+            return dash.no_update
+    else:
+        ruta_archivo = ruta_betis / index_str
+        
+    if ruta_archivo.exists(): return dcc.send_file(str(ruta_archivo))
+    return dash.no_update
+
+@app.callback(
+    Output("download-eventing-img", "data"),
+    Input({'type': 'btn-descarga-img-eventing', 'index': dash.ALL}, 'n_clicks'),
+    prevent_initial_call=True
+)
+def descargar_img_eventing(n_clicks):
+    ctx = callback_context
+    if not ctx.triggered: return dash.no_update
+    clicked_id = ctx.triggered_id
+    val_trigger = ctx.triggered[0]['value']
+    if not clicked_id or val_trigger is None or val_trigger == 0: return dash.no_update
+    index_str = clicked_id['index']
+    id_liga, nombre_img = index_str.split('____', 1)
+    nombre_subcarpeta = MAPEO_LIGAS_CARPETAS.get(id_liga, "")
+    ruta_archivo = ruta_eventing_img / nombre_subcarpeta / nombre_img
+    if ruta_archivo.exists(): return dcc.send_file(str(ruta_archivo))
+    return dash.no_update
+
+@app.callback(
+    Output("download-excel", "data"),
+    [Input("btn-global-1", "n_clicks"), Input("btn-global-2", "n_clicks"), Input({'type': 'btn-liga', 'index': dash.ALL}, 'n_clicks')],
+    State('url', 'pathname'), prevent_initial_call=True
+)
+def manejar_descargas_globales(n1, n2, n_lista, pathname):
+    ctx = callback_context
+    if not ctx.triggered: return dash.no_update
+    tr_id = ctx.triggered_id
+    val_trigger = ctx.triggered[0]['value']
+    if val_trigger is None or val_trigger == 0: return dash.no_update
+    if tr_id == "btn-global-1": return dcc.send_file(str(ruta_excel_jugadores))
+    if tr_id == "btn-global-2": return dcc.send_file(str(ruta_excel_equipos))
+    if isinstance(tr_id, dict) and tr_id.get('type') == 'btn-liga':
+        nombre = tr_id['index']
+        partes = pathname.strip('/').split('/')
+        ruta = ruta_jornadas / MAPEO_LIGAS_CARPETAS.get(partes[0], "") / "jsons finales" / f"{nombre}.xlsx"
+        if os.path.exists(ruta): return dcc.send_file(str(ruta))
+    return dash.no_update
+
+@app.callback(
+    Output('contenedor-descarga-partido', 'children'),
+    Input('dropdown-partidos', 'value')
+)
+def mostrar_boton_partido(value):
+    if value:
+        return html.Div(style=ESTILO_CAJA_EXCEL, children=[
+            html.Span(f"⚽ {value.replace('.xlsx', '').replace('_', ' ')}", style={'fontSize': '20px'}),
+            html.Button("DESCARGAR EVENTING", id="btn-descarga-evento", n_clicks=0, className="btn-download")
+        ])
+    return ""
+
+@app.callback(
+    Output("download-partido", "data"),
+    Input("btn-descarga-evento", "n_clicks"),
+    [State('dropdown-partidos', 'value'), State('url', 'pathname')],
+    prevent_initial_call=True
+)
+def descargar_partido(n_clicks, filename, pathname):
+    if n_clicks and n_clicks > 0 and filename:
+        id_liga = pathname.strip('/').split('/')[0]
+        ruta = ruta_eventing_base / MAPEO_EVENTING.get(id_liga, "") / filename
+        if os.path.exists(ruta): return dcc.send_file(str(ruta))
+    return dash.no_update
+
+# --- AÑADIDO: CALLBACKS DEL RANKING ---
+@app.callback(
+    Output('scroll-ranking-container', 'children'),
+    Input('dropdown-ranking-equipo', 'value')
+)
+def actualizar_ranking(equipo_seleccionado):
+    return generar_lista_ranking(ranking_equipos, equipo_seleccionado)
+
+app.clientside_callback(
+    """
+    function(equipo_seleccionado) {
+        if (equipo_seleccionado) {
+            setTimeout(function() {
+                var elementId = 'item-ranking-' + equipo_seleccionado.replace(/ /g, '_');
+                var el = document.getElementById(elementId);
+                if (el) {
+                    el.scrollIntoView({behavior: "smooth", block: "center"});
+                }
+            }, 300);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('dropdown-ranking-equipo', 'id'), 
+    Input('dropdown-ranking-equipo', 'value'),
+    prevent_initial_call=True
+)
+# --------------------------------------
+
+# Estructura del HTML
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>{%metas%}<title>SPQR Analytics</title>{%favicon%}{%css%}
+        <style>
+            .btn-download { background-color: #00FFCC; color: black; border: none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+            .btn-download:hover { background-color: #00ccaa; transform: scale(1.05); }
+            .Select-control { border-radius: 10px !important; height: 45px !important; }
+        </style>
+    </head>
+    <body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body>
+</html>
+'''
+
+def open_browser():
+    webbrowser.open_new("http://127.0.0.1:8050")
+
+if __name__ == '__main__':
+    Timer(1, open_browser).start()
+    app.run(debug=True, port=8050)

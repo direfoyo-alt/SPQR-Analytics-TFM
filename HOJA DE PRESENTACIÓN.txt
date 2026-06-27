@@ -1,0 +1,20 @@
+GUÍA DE PRESENTACIÓN 
+
+Este repositorio constituye el soporte técnico y la entrega documental del Trabajo de Fin de Máster (TFM) 
+SPQR Analytics es una herramienta de análisis de datos aplicada al rendimiento futbolístico, diseñada para optimizar la toma de decisiones tácticas mediante el procesamiento de datos cuantitativos. El objetivo principal es transformar datos brutos en métricas accionables que permitan un análisis profundo del juego y del rendimiento de los jugadores.
+
+CÓMO EJECUTAR LA HERRAMIENTA
+
+Asegúrate de tener instalado Python X.X.
+
+Instala las librerías necesarias: pip install -r requirements.txt.
+
+Ejecuta el script principal con: python main.py.
+
+ESTRUCTURA
+
+data: Aquí van todos tus archivos Excel o CSV (los datos crudos y procesados), las imágenes, logo, fondo, nombre, archivos de PowerBy.
+
+scripts excells: Aquí están los códigos pequeños (scripts) que usaste para limpiar o procesar esos Excel.
+
+spqr analytics script: Aquí va el código fuente principal de tu herramienta (la lógica que corre el programa).

@@ -1,0 +1,139 @@
+# ==========================================
+# 0. INSTALACIÓN AUTOMÁTICA DE LIBRERÍAS
+# ==========================================
+import sys
+import subprocess
+
+def install(package):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+# Lista de librerías necesarias para el Excel y los datos
+librerias = ['pandas', 'xlsxwriter', 'openpyxl']
+
+for lib in librerias:
+    try:
+        __import__(lib)
+    except ImportError:
+        print(f"Installing {lib}...")
+        install(lib)
+
+import pandas as pd
+import os
+
+# ==========================================
+# 1. CONFIGURACIÓN DE RUTAS Y CARPETAS
+# ==========================================
+# Detectamos el escritorio del usuario actual
+escritorio = os.path.join(os.path.expanduser("~"), "Desktop")
+nombre_carpeta = "excell directorio de equipos"
+ruta_destino = os.path.join(escritorio, nombre_carpeta)
+
+# Creamos la carpeta si no existe
+if not os.path.exists(ruta_destino):
+    os.makedirs(ruta_destino)
+    print(f"📂 Carpeta lista en: {ruta_destino}")
+
+# Nombre del archivo final
+archivo_final = os.path.join(ruta_destino, 'Directorio_Recursos_Equipos_PRO2_ACTUALIZADO.xlsx')
+
+# ==========================================
+# 2. DETECCIÓN AUTOMÁTICA DE CSV ACTUALIZADOS
+# ==========================================
+# El código buscará cualquier archivo que termine en "equipos_last_2.csv" 
+# Así, si en el futuro cambias los nombres pero mantienes el formato, funcionará.
+archivos_en_carpeta = [f for f in os.listdir('.') if f.endswith('equipos_last_2.csv')]
+
+# Mapeo de países para Soccerway (esto asegura que los links funcionen)
+mapeo_paises = {
+    'spain': 'spain', 'primera': 'spain',
+    'england': 'england', 'premier': 'england',
+    'germany': 'germany', 'bundesliga': 'germany',
+    'italy': 'italy', 'serie_a': 'italy',
+    'france': 'france', 'ligue_1': 'france'
+}
+
+dataframes = []
+
+for archivo in archivos_en_carpeta:
+    try:
+        df = pd.read_csv(archivo)
+        
+        # Identificar país para el link de Soccerway
+        nombre_lower = archivo.lower()
+        pais_slug = 'spain' # por defecto
+        for clave, valor in mapeo_paises.items():
+            if clave in nombre_lower:
+                pais_slug = valor
+                break
+        
+        # --- GENERACIÓN DE LINKS PROFESIONALES (SOCCERWAY) ---
+        def generar_link_soccerway(row, tipo):
+            try:
+                base_link = str(row['link'])
+                if '/teams/' in base_link:
+                    team_slug = base_link.split('/teams/')[1].split('/')[0]
+                    if tipo == 'squad':
+                        return f"https://int.soccerway.com/teams/{pais_slug}/{team_slug}/squad/"
+                    elif tipo == 'matches':
+                        return f"https://int.soccerway.com/teams/{pais_slug}/{team_slug}/matches/"
+                    else: # Statistics
+                        return f"https://int.soccerway.com/teams/{pais_slug}/{team_slug}/"
+                return base_link
+            except:
+                return ""
+
+        df['url_squad'] = df.apply(lambda r: generar_link_soccerway(r, 'squad'), axis=1)
+        df['url_matches_equipo'] = df.apply(lambda r: generar_link_soccerway(r, 'matches'), axis=1)
+        df['url_seasonstats'] = df.apply(lambda r: generar_link_soccerway(r, 'stats'), axis=1)
+        
+        dataframes.append(df)
+        print(f"✅ Procesado con éxito: {archivo}")
+    except Exception as e:
+        print(f"⚠️ Error al procesar {archivo}: {e}")
+
+# ==========================================
+# 3. UNIÓN Y CREACIÓN DEL EXCEL DORADO
+# ==========================================
+if not dataframes:
+    print("❌ No se encontraron archivos CSV para procesar. Revisa que estén en esta carpeta.")
+else:
+    df_global = pd.concat(dataframes, ignore_index=True)
+
+    # Creamos el Excel con formato profesional
+    writer = pd.ExcelWriter(archivo_final, engine='xlsxwriter')
+    df_global.to_excel(writer, index=False, sheet_name='Directorio Maestro')
+    
+    workbook = writer.book
+    worksheet = writer.sheets['Directorio Maestro']
+    
+    # Formato Dorado para la cabecera (Diferenciador TFM)
+    header_fmt = workbook.add_format({
+        'bold': True,
+        'bg_color': '#D4AF37',
+        'font_color': 'black',
+        'border': 1,
+        'align': 'center',
+        'valign': 'vcenter'
+    })
+    
+    # Formato para que los links sean azules
+    link_fmt = workbook.add_format({'font_color': 'blue', 'underline': 1})
+
+    # Aplicar diseño
+    for col_num, value in enumerate(df_global.columns.values):
+        worksheet.write(0, col_num, value, header_fmt)
+        worksheet.set_column(col_num, col_num, 30) # Ancho de columna cómodo
+
+    # Activar los hipervínculos
+    cols_links = [1, 2, 6, 7, 8] # Columnas: link, logo, squad, matches, stats
+    for row in range(len(df_global)):
+        for col in cols_links:
+            url = df_global.iloc[row, col]
+            if pd.notna(url) and str(url).startswith('http'):
+                worksheet.write_url(row + 1, col, url, link_fmt)
+
+    writer.close()
+    print("\n" + "="*40)
+    print(f"🚀 EXCEL ACTUALIZADO CREADO CON ÉXITO")
+    print(f"📍 Ubicación: {archivo_final}")
+    print("="*40)
